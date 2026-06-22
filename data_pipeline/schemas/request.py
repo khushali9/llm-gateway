@@ -99,9 +99,6 @@ class InferRequest(BaseModel):
             "prompt_token_estimate": self.prompt_token_estimate(),
         }
 
-    class Config:
-        use_enum_values = True
-
 
 class InferResponse(BaseModel):
     """
