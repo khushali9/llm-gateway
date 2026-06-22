@@ -1,0 +1,27 @@
+# Kafka
+confluent-kafka==2.3.0
+
+# API
+fastapi
+uvicorn
+pydantic
+
+# Spark
+pyspark==3.4.1
+
+# Delta Lake
+delta-spark==2.4.0
+
+# Feature store
+feast[redis]
+
+# Redis
+redis
+
+# Data
+pandas
+numpy
+pyarrow
+
+# Utils
+python-dotenv
