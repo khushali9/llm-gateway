@@ -1,0 +1,16 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.env
+.venv/
+venv/
+*.log
+*.ncu-rep
+*.parquet
+delta_lake/
+checkpoints/
+*.gguf
+*.bin
+*.safetensors
+node_modules/
+.DS_Store
