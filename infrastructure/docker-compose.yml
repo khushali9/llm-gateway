@@ -10,6 +10,9 @@ services:
       ZOOKEEPER_TICK_TIME: 2000
     ports:
       - "2181:2181"
+    volumes:
+      - ./volumes/zookeeper-data:/var/lib/zookeeper/data
+      - ./volumes/zookeeper-log:/var/lib/zookeeper/log
     healthcheck:
       test: ["CMD", "nc", "-z", "localhost", "2181"]
       interval: 10s
@@ -37,6 +40,8 @@ services:
       KAFKA_JMX_PORT: 9101
       KAFKA_JMX_HOSTNAME: localhost
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: 'true'
+    volumes:
+      - ./volumes/kafka-data:/var/lib/kafka/data
     healthcheck:
       test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9092"]
       interval: 15s
@@ -61,7 +66,9 @@ services:
     container_name: redis
     ports:
       - "6379:6379"
-    command: redis-server --maxmemory 2gb --maxmemory-policy allkeys-lru
+    command: redis-server --maxmemory 2gb --maxmemory-policy allkeys-lru --appendonly yes
+    volumes:
+      - ./volumes/redis-data:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -84,8 +91,10 @@ services:
     container_name: spark-master
     command: /opt/spark/bin/spark-class org.apache.spark.deploy.master.Master
     ports:
-      - "8082:8080"   # Spark UI
-      - "7077:7077"   # Spark master port
+      - "8082:8080"
+      - "7077:7077"
+    volumes:
+      - ./volumes/spark-logs:/opt/spark/logs
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080"]
       interval: 15s
@@ -102,7 +111,16 @@ services:
     environment:
       SPARK_WORKER_MEMORY: 4g
       SPARK_WORKER_CORES: 2
+    volumes:
+      - ./volumes/spark-logs:/opt/spark/logs
 
 networks:
   default:
     name: llm-gateway-network
+
+volumes:
+  zookeeper-data:
+  zookeeper-log:
+  kafka-data:
+  redis-data:
+  spark-logs:
