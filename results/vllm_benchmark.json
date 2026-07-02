@@ -1,0 +1,41 @@
+[
+  {
+    "name": "short prompt",
+    "prompt": "What is the capital of France?",
+    "max_tokens": 50,
+    "ttft_mean_ms": 111.64,
+    "ttft_p50_ms": 70.41,
+    "ttft_p99_ms": 193.29,
+    "itl_mean_ms": 31.8,
+    "itl_p50_ms": 32.39,
+    "itl_p99_ms": 33.64,
+    "num_runs": 3,
+    "tokens_generated": 151
+  },
+  {
+    "name": "medium prompt",
+    "prompt": "Explain how transformer attention works. Include the mathematical formulation and explain why it is effective for sequence modeling.",
+    "max_tokens": 150,
+    "ttft_mean_ms": 68.45,
+    "ttft_p50_ms": 69.0,
+    "ttft_p99_ms": 69.32,
+    "itl_mean_ms": 32.3,
+    "itl_p50_ms": 32.41,
+    "itl_p99_ms": 34.02,
+    "num_runs": 3,
+    "tokens_generated": 451
+  },
+  {
+    "name": "long generation",
+    "prompt": "Write a Python function to implement quicksort.",
+    "max_tokens": 256,
+    "ttft_mean_ms": 69.64,
+    "ttft_p50_ms": 69.12,
+    "ttft_p99_ms": 70.96,
+    "itl_mean_ms": 32.39,
+    "itl_p50_ms": 32.41,
+    "itl_p99_ms": 33.62,
+    "num_runs": 3,
+    "tokens_generated": 769
+  }
+]
