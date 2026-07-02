@@ -1,19 +1,21 @@
 # router/api.py
 #
-# FastAPI endpoint — now with real vLLM inference.
+# FastAPI endpoint with real backend dispatch.
+# Routes to correct backend based on RouterService decision.
 
 import time
 import logging
-import asyncio
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from typing import Optional
+import traceback
 
 from data_pipeline.schemas.request import InferRequest, UserTier, TaskType
 from data_pipeline.kafka.producer import RequestProducer
 from router.router import RouterService
 from inference.vllm_client import VLLMClient
+from inference.sglang_client import SGLangClient
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -21,13 +23,27 @@ logger = logging.getLogger(__name__)
 app = FastAPI(
     title       = "LLM Inference Gateway",
     description = "Adaptive routing gateway for LLM inference",
-    version     = "0.2.0",
+    version     = "0.3.0",
 )
 
-# initialize once at startup
+# initialize all clients at startup
 router_service = RouterService()
 kafka_producer  = RequestProducer()
 vllm_client     = VLLMClient(base_url="http://localhost:8001")
+sglang_client   = SGLangClient(base_url="http://localhost:8002")
+
+
+def get_client(backend: str):
+    """
+    Return the correct inference client based on routing decision.
+    Falls back to vLLM if backend not available.
+    """
+    if backend == "sglang_code":
+        return sglang_client
+    else:
+        # vllm_fast, vllm_large, tensorrt_reasoning all use vLLM for now
+        # TensorRT-LLM added in Phase 3 next step
+        return vllm_client
 
 
 class InferRequestBody(BaseModel):
@@ -39,25 +55,26 @@ class InferRequestBody(BaseModel):
     latency_slo_ms: Optional[int] = None
     session_id:     Optional[str] = None
     stream:         bool          = False
-
+    system_prompt:  Optional[str] = None   
 
 @app.get("/health")
 async def health():
-    vllm_healthy = await vllm_client.health()
+    vllm_healthy   = await vllm_client.health()
+    sglang_healthy = await sglang_client.health()
     return {
-        "status":       "healthy",
-        "version":      "0.2.0",
-        "vllm_healthy": vllm_healthy,
+        "status":         "healthy",
+        "version":        "0.3.0",
+        "backends": {
+            "vllm":   vllm_healthy,
+            "sglang": sglang_healthy,
+        }
     }
 
 
 @app.post("/infer")
 async def infer(body: InferRequestBody):
-    """
-    Main inference endpoint with real vLLM backend.
-    """
     try:
-        # validate request
+        # validate
         request = InferRequest(
             prompt         = body.prompt,
             max_tokens     = body.max_tokens,
@@ -71,18 +88,20 @@ async def infer(body: InferRequestBody):
         # publish to Kafka
         kafka_producer.publish(request)
 
-        # route request
+        # route
         routing_result = router_service.route_request(
             request.to_kafka_payload()
         )
 
-        # real inference via vLLM
-        t_inference_start = time.perf_counter()
+        # get correct client based on routing decision
+        client = get_client(routing_result["backend"])
+
+        # inference
+        t0 = time.perf_counter()
 
         if body.stream:
-            # streaming response
             async def token_stream():
-                async for token in vllm_client.generate_stream(
+                async for token in client.generate_stream(
                     prompt     = body.prompt,
                     max_tokens = body.max_tokens,
                 ):
@@ -92,32 +111,31 @@ async def infer(body: InferRequestBody):
                 token_stream(),
                 media_type="text/plain",
                 headers={
-                    "X-Backend":          routing_result["backend"],
-                    "X-Model":            routing_result["model"],
-                    "X-Routing-Latency":  str(routing_result["total_latency_ms"]),
+                    "X-Backend":         routing_result["backend"],
+                    "X-Model":           routing_result["model"],
+                    "X-Routing-Latency": str(routing_result["total_latency_ms"]),
                 }
             )
 
-        # non-streaming response
-        inference_result = await vllm_client.generate(
+        inference_result  = await client.generate(
             prompt     = body.prompt,
             max_tokens = body.max_tokens,
+            system_prompt = body.system_prompt,
         )
-
-        total_latency_ms = (time.perf_counter() - t_inference_start) * 1000
+        inference_latency = (time.perf_counter() - t0) * 1000
 
         return {
-            "request_id":          request.request_id,
-            "backend":             routing_result["backend"],
-            "model":               routing_result["model"],
-            "reason":              routing_result["reason"],
-            "generated_text":      inference_result["text"],
-            "prompt_tokens":       inference_result["prompt_tokens"],
-            "completion_tokens":   inference_result["completion_tokens"],
-            "routing_latency_ms":  routing_result["total_latency_ms"],
-            "inference_latency_ms": round(total_latency_ms, 2),
-            "total_latency_ms":    round(
-                routing_result["total_latency_ms"] + total_latency_ms, 2
+            "request_id":           request.request_id,
+            "backend":              routing_result["backend"],
+            "model":                routing_result["model"],
+            "reason":               routing_result["reason"],
+            "generated_text":       inference_result["text"],
+            "prompt_tokens":        inference_result["prompt_tokens"],
+            "completion_tokens":    inference_result["completion_tokens"],
+            "routing_latency_ms":   routing_result["total_latency_ms"],
+            "inference_latency_ms": round(inference_latency, 2),
+            "total_latency_ms":     round(
+                routing_result["total_latency_ms"] + inference_latency, 2
             ),
         }
 
@@ -125,6 +143,7 @@ async def infer(body: InferRequestBody):
         raise HTTPException(status_code=422, detail=str(e))
     except Exception as e:
         logger.error(f"Error: {e}")
+        logger.error(traceback.format_exc())
         raise HTTPException(status_code=500, detail=str(e))
 
 

@@ -1,25 +1,26 @@
-# inference/vllm_client.py
+# inference/sglang_client.py
 #
-# Client for vLLM OpenAI-compatible API.
-# Used by the router to forward requests to vLLM backend.
+# Client for SGLang's OpenAI-compatible API.
+# Same interface as VLLMClient for easy swapping.
 
 import time
 import httpx
+import json
 import logging
-from typing import Optional, AsyncGenerator
+from typing import AsyncGenerator
 
 logger = logging.getLogger(__name__)
 
-VLLM_URL = "http://localhost:8001"
+SGLANG_URL = "http://localhost:8002"
 
 
-class VLLMClient:
+class SGLangClient:
     """
-    Async client for vLLM's OpenAI-compatible API.
-    Supports both streaming and non-streaming inference.
+    Async client for SGLang server.
+    SGLang exposes OpenAI-compatible API — same as vLLM.
     """
 
-    def __init__(self, base_url: str = VLLM_URL):
+    def __init__(self, base_url: str = SGLANG_URL):
         self.base_url = base_url
         self.client   = httpx.AsyncClient(timeout=120.0)
 
@@ -30,15 +31,12 @@ class VLLMClient:
     temperature:   float = 0.7,
     model:         str   = "Mistral-7B-Instruct-v0.3",
     system_prompt: str   = None,   # ← add this
-) -> dict:
+    ) -> dict:
         messages = []
         if system_prompt:
             messages.append({"role": "system", "content": system_prompt})
         messages.append({"role": "user", "content": prompt})
-        """
-        Non-streaming generation.
-        Returns complete response with latency metrics.
-        """
+        """Non-streaming generation."""
         start = time.perf_counter()
 
         response = await self.client.post(
@@ -56,24 +54,21 @@ class VLLMClient:
         latency_ms = (time.perf_counter() - start) * 1000
 
         return {
-            "text":             data["choices"][0]["message"]["content"],
-            "prompt_tokens":    data["usage"]["prompt_tokens"],
+            "text":              data["choices"][0]["message"]["content"],
+            "prompt_tokens":     data["usage"]["prompt_tokens"],
             "completion_tokens": data["usage"]["completion_tokens"],
-            "latency_ms":       round(latency_ms, 2),
-            "model":            data["model"],
+            "latency_ms":        round(latency_ms, 2),
+            "model":             data["model"],
         }
 
     async def generate_stream(
         self,
-        prompt:     str,
-        max_tokens: int    = 256,
+        prompt:      str,
+        max_tokens:  int   = 256,
         temperature: float = 0.7,
-        model:      str    = "mistral-7b",
+        model:       str   = "Mistral-7B-Instruct-v0.3",
     ) -> AsyncGenerator[str, None]:
-        """
-        Streaming generation — yields tokens as they arrive.
-        Used for real-time token streaming to the user.
-        """
+        """Streaming generation."""
         async with self.client.stream(
             "POST",
             f"{self.base_url}/v1/chat/completions",
@@ -89,14 +84,12 @@ class VLLMClient:
                 if not line or line == "data: [DONE]":
                     continue
                 if line.startswith("data: "):
-                    import json
                     data = json.loads(line[6:])
                     delta = data["choices"][0].get("delta", {})
                     if "content" in delta:
                         yield delta["content"]
 
     async def health(self) -> bool:
-        """Check if vLLM server is healthy."""
         try:
             response = await self.client.get(f"{self.base_url}/health")
             return response.status_code == 200
