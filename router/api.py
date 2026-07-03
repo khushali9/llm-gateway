@@ -35,14 +35,23 @@ sglang_client   = SGLangClient(base_url="http://localhost:8002")
 
 def get_client(backend: str):
     """
-    Return the correct inference client based on routing decision.
+    Return correct inference client based on routing decision.
     Falls back to vLLM if backend not available.
     """
     if backend == "sglang_code":
-        return sglang_client
+        # use SGLang if running, fallback to vLLM
+        try:
+            import httpx
+            httpx.get("http://localhost:8002/health", timeout=1.0)
+            return sglang_client
+        except Exception:
+            logger.warning("SGLang not available, falling back to vLLM")
+            return vllm_client
+    elif backend == "tensorrt_reasoning":
+        # TensorRT not running yet → fallback to vLLM
+        logger.warning("TensorRT not available, falling back to vLLM")
+        return vllm_client
     else:
-        # vllm_fast, vllm_large, tensorrt_reasoning all use vLLM for now
-        # TensorRT-LLM added in Phase 3 next step
         return vllm_client
 
 

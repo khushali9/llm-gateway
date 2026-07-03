@@ -1,41 +1,67 @@
-[
-  {
-    "name": "short prompt",
-    "prompt": "What is the capital of France?",
-    "max_tokens": 50,
-    "ttft_mean_ms": 111.64,
-    "ttft_p50_ms": 70.41,
-    "ttft_p99_ms": 193.29,
-    "itl_mean_ms": 31.8,
-    "itl_p50_ms": 32.39,
-    "itl_p99_ms": 33.64,
-    "num_runs": 3,
-    "tokens_generated": 151
+{
+  "backend": "vllm",
+  "baseline": {
+    "short_prompt": {
+      "routing_p50_ms": 0.88,
+      "routing_p99_ms": 0.89,
+      "inference_p50_ms": 1646.84,
+      "inference_p99_ms": 1653.16,
+      "total_p50_ms": 1647.72,
+      "total_p99_ms": 1654.04,
+      "itl_ms": 32.96,
+      "avg_tokens": 50
+    },
+    "medium_prompt": {
+      "routing_p50_ms": 0.85,
+      "routing_p99_ms": 1.11,
+      "inference_p50_ms": 4907.92,
+      "inference_p99_ms": 4922.29,
+      "total_p50_ms": 4909.03,
+      "total_p99_ms": 4923.13,
+      "itl_ms": 32.71,
+      "avg_tokens": 150
+    },
+    "code_generation": {
+      "routing_p50_ms": 0.89,
+      "routing_p99_ms": 0.89,
+      "inference_p50_ms": 6517.55,
+      "inference_p99_ms": 6546.92,
+      "total_p50_ms": 6518.42,
+      "total_p99_ms": 6547.81,
+      "itl_ms": 32.63,
+      "avg_tokens": 200
+    },
+    "long_generation": {
+      "routing_p50_ms": 1.02,
+      "routing_p99_ms": 1.03,
+      "inference_p50_ms": 9785.52,
+      "inference_p99_ms": 9790.1,
+      "total_p50_ms": 9786.42,
+      "total_p99_ms": 9791.11,
+      "itl_ms": 32.59,
+      "avg_tokens": 300
+    }
   },
-  {
-    "name": "medium prompt",
-    "prompt": "Explain how transformer attention works. Include the mathematical formulation and explain why it is effective for sequence modeling.",
-    "max_tokens": 150,
-    "ttft_mean_ms": 68.45,
-    "ttft_p50_ms": 69.0,
-    "ttft_p99_ms": 69.32,
-    "itl_mean_ms": 32.3,
-    "itl_p50_ms": 32.41,
-    "itl_p99_ms": 34.02,
-    "num_runs": 3,
-    "tokens_generated": 451
+  "ttft": {
+    "short_prompt": {
+      "ttft_p50_ms": 104.53,
+      "ttft_p99_ms": 105.7,
+      "ttft_mean_ms": 97.81
+    },
+    "medium_prompt": {
+      "ttft_p50_ms": 104.43,
+      "ttft_p99_ms": 105.7,
+      "ttft_mean_ms": 103.34
+    },
+    "code_generation": {
+      "ttft_p50_ms": 103.61,
+      "ttft_p99_ms": 104.75,
+      "ttft_mean_ms": 102.77
+    }
   },
-  {
-    "name": "long generation",
-    "prompt": "Write a Python function to implement quicksort.",
-    "max_tokens": 256,
-    "ttft_mean_ms": 69.64,
-    "ttft_p50_ms": 69.12,
-    "ttft_p99_ms": 70.96,
-    "itl_mean_ms": 32.39,
-    "itl_p50_ms": 32.41,
-    "itl_p99_ms": 33.62,
-    "num_runs": 3,
-    "tokens_generated": 769
+  "continuous_batching": {
+    "sequential_ms": 8368.168478000029,
+    "concurrent_ms": 1907.4973750000481,
+    "speedup": 4.386988201228752
   }
-]
+}
