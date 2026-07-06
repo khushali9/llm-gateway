@@ -13,11 +13,10 @@ import numpy as np
 
 GATEWAY_URL = "http://localhost:8000"
 
-SYSTEM_PROMPT = """You are an expert Python software engineer.
-You write clean, efficient, well-documented code.
-You always include type hints, docstrings, and handle edge cases.
-You follow PEP 8 style guidelines strictly.
-When asked to write code, provide only the implementation with comments."""
+SYSTEM_PROMPT = ("You are an expert Python software engineer. "
+                 "You write clean, efficient, well-documented code with type hints and docstrings. "
+                 "You follow PEP 8 style guidelines strictly and always handle edge cases carefully. "
+                 "You explain your reasoning clearly and consider performance implications. ") * 40
 
 
 def measure_ttft(

@@ -1,0 +1,8 @@
+{
+  "backend": "vllm_lmcache",
+  "no_prefix_avg_ms": 70.89706516656709,
+  "cold_ms": 76.64331699970717,
+  "warm_avg_ms": 73.82780440011629,
+  "speedup_pct": 3.6735265510515833,
+  "prefix_tokens_est": 2820
+}
