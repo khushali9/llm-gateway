@@ -10,6 +10,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from typing import Optional
 import traceback
+from inference.llamacpp_client import LlamaCppClient
 
 from data_pipeline.schemas.request import InferRequest, UserTier, TaskType
 from data_pipeline.kafka.producer import RequestProducer
@@ -31,28 +32,49 @@ router_service = RouterService()
 kafka_producer  = RequestProducer()
 vllm_client     = VLLMClient(base_url="http://localhost:8001")
 sglang_client   = SGLangClient(base_url="http://localhost:8002")
+llamacpp_client = LlamaCppClient(base_url="http://localhost:8003")
 
 
 def get_client(backend: str):
     """
     Return correct inference client based on routing decision.
-    Falls back to vLLM if backend not available.
+
+    Dispatch:
+      vllm_fast / vllm_large  → vLLM (port 8001)
+      sglang_code             → SGLang if healthy, else vLLM
+      tensorrt_reasoning      → not deployed → vLLM
+    Fallback:
+      if the chosen GPU backend is unreachable, degrade to
+      llama.cpp CPU backend (slow but no GPU needed).
     """
-    if backend == "sglang_code":
-        # use SGLang if running, fallback to vLLM
+    import httpx
+
+    def _healthy(url: str) -> bool:
         try:
-            import httpx
-            httpx.get("http://localhost:8002/health", timeout=1.0)
-            return sglang_client
+            r = httpx.get(url, timeout=1.0)
+            return r.status_code == 200
         except Exception:
-            logger.warning("SGLang not available, falling back to vLLM")
-            return vllm_client
+            return False
+
+    # pick the intended client
+    if backend == "sglang_code":
+        if _healthy("http://localhost:8002/health"):
+            return sglang_client
+        logger.warning("SGLang unavailable → trying vLLM")
+        chosen = vllm_client
     elif backend == "tensorrt_reasoning":
-        # TensorRT not running yet → fallback to vLLM
-        logger.warning("TensorRT not available, falling back to vLLM")
-        return vllm_client
+        logger.warning("TensorRT not deployed → using vLLM")
+        chosen = vllm_client
     else:
-        return vllm_client
+        # vllm_fast and vllm_large both currently served by vLLM on 8001
+        chosen = vllm_client
+
+    # pre-flight: if the chosen GPU backend is down, fall back to CPU
+    if not _healthy("http://localhost:8001/health"):
+        logger.warning("vLLM (GPU) unavailable → falling back to llama.cpp CPU")
+        return llamacpp_client
+
+    return chosen
 
 
 class InferRequestBody(BaseModel):
@@ -68,14 +90,16 @@ class InferRequestBody(BaseModel):
 
 @app.get("/health")
 async def health():
-    vllm_healthy   = await vllm_client.health()
-    sglang_healthy = await sglang_client.health()
+    vllm_healthy     = await vllm_client.health()
+    sglang_healthy   = await sglang_client.health()
+    llamacpp_healthy = await llamacpp_client.health()
     return {
-        "status":         "healthy",
-        "version":        "0.3.0",
+        "status":  "healthy",
+        "version": "0.3.0",
         "backends": {
-            "vllm":   vllm_healthy,
-            "sglang": sglang_healthy,
+            "vllm":     vllm_healthy,
+            "sglang":   sglang_healthy,
+            "llamacpp": llamacpp_healthy,
         }
     }
 
