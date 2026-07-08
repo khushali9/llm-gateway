@@ -8,7 +8,7 @@ from typing import AsyncGenerator
 
 logger = logging.getLogger(__name__)
 
-VLLM_URL = "http://localhost:8001"
+VLLM_URL = "http://127.0.0.1:30800"
 
 
 class VLLMClient:

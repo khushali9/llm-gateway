@@ -30,7 +30,7 @@ app = FastAPI(
 # initialize all clients at startup
 router_service = RouterService()
 kafka_producer  = RequestProducer()
-vllm_client     = VLLMClient(base_url="http://localhost:8001")
+vllm_client     = VLLMClient(base_url="http://127.0.0.1:30800")
 sglang_client   = SGLangClient(base_url="http://localhost:8002")
 llamacpp_client = LlamaCppClient(base_url="http://localhost:8003")
 
@@ -40,7 +40,7 @@ def get_client(backend: str):
     Return correct inference client based on routing decision.
 
     Dispatch:
-      vllm_fast / vllm_large  → vLLM (port 8001)
+      vllm_fast / vllm_large  → vLLM (port 30800)
       sglang_code             → SGLang if healthy, else vLLM
       tensorrt_reasoning      → not deployed → vLLM
     Fallback:
@@ -51,7 +51,7 @@ def get_client(backend: str):
 
     def _healthy(url: str) -> bool:
         try:
-            r = httpx.get(url, timeout=1.0)
+            r = httpx.get(url, timeout=3.0)
             return r.status_code == 200
         except Exception:
             return False
@@ -69,8 +69,9 @@ def get_client(backend: str):
         # vllm_fast and vllm_large both currently served by vLLM on 8001
         chosen = vllm_client
 
-    # pre-flight: if the chosen GPU backend is down, fall back to CPU
-    if not _healthy("http://localhost:8001/health"):
+    # pre-flight: if the chosen
+    #GPU backend is down, fall back to CPU
+    if not _healthy("http://127.0.0.1:30800/health"):
         logger.warning("vLLM (GPU) unavailable → falling back to llama.cpp CPU")
         return llamacpp_client
 
