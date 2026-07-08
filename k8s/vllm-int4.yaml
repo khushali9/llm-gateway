@@ -1,0 +1,62 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vllm-fast
+  labels:
+    app: vllm-fast
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: vllm-fast
+  template:
+    metadata:
+      labels:
+        app: vllm-fast
+    spec:
+      runtimeClassName: nvidia          # run under the NVIDIA runtime (GPU access)
+      containers:
+        - name: vllm
+          image: vllm/vllm-openai:latest   # public image, k3s pulls from Docker Hub
+          args:
+            - "--model"
+            - "/models/Mistral-7B-Instruct-v0.3-W4A16-G128"
+            - "--served-model-name"
+            - "mistral-7b"
+            - "--max-model-len"
+            - "4096"
+            - "--gpu-memory-utilization"
+            - "0.80"
+            - "--port"
+            - "8000"
+          ports:
+            - containerPort: 8000
+          resources:
+            limits:
+              nvidia.com/gpu: 1          # request 1 GPU — scheduler places accordingly
+          volumeMounts:
+            - name: models
+              mountPath: /models
+          # give the model time to load before health checks kill it
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            failureThreshold: 30
+            periodSeconds: 10             # up to 300s to become ready
+      volumes:
+        - name: models
+          hostPath:
+            path: /home/ubuntu/models     # mount host models dir into the pod
+            type: Directory
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: vllm-fast
+spec:
+  selector:
+    app: vllm-fast                        # routes to pods with this label
+  ports:
+    - port: 8000
+      targetPort: 8000
