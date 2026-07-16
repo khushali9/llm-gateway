@@ -1,0 +1,305 @@
+# ============================================================================
+# Phase 4 — Tier 2 backend manifests (4 GPUs, g4dn.12xlarge, 4x T4 16GB)
+#
+# Apply with:  kubectl apply -f tier2-backends.yaml
+#
+# Placement plan:
+#   GPU 0+1 -> vLLM FP16  (tensor-parallel-size 2)   Service: vllm-large
+#   GPU 2   -> vLLM INT4  (fast path)                 Service: vllm-fast
+#   GPU 3   -> SGLang                                 Service: sglang-code
+#   CPU     -> llama.cpp  (no GPU)                    Service: llamacpp-cpu
+#
+# Model paths match the g5 snapshot (identical after EBS snapshot restore):
+#   FP16: /home/ubuntu/models/Mistral-7B-Instruct-v0.3
+#   INT4: /home/ubuntu/models/Mistral-7B-Instruct-v0.3-W4A16-G128
+#   GGUF: /home/ubuntu/models/gguf/Mistral-7B-Instruct-v0.3.Q4_K_M.gguf
+#
+# All images are PUBLIC (no registry needed): k3s pulls them directly.
+# ============================================================================
+
+# ----------------------------------------------------------------------------
+# 1) vLLM FP16 — "large / quality" backend, tensor-parallel across 2 T4s
+#    FP16 Mistral-7B (~14.5GB) does NOT fit on one 16GB T4, so we split it
+#    across GPU 0+1 with tensor-parallel-size 2 (~7.25GB weights per GPU,
+#    leaving ~8GB each for KV cache).
+#    NOTE: the two GPUs exchange activations every layer over PCIe (T4s have
+#    no NVLink) — this is the interconnect cost we measure in Tier 3.
+# ----------------------------------------------------------------------------
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vllm-large
+  labels:
+    app: vllm-large
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: vllm-large
+  template:
+    metadata:
+      labels:
+        app: vllm-large
+    spec:
+      runtimeClassName: nvidia
+      containers:
+        - name: vllm
+          image: vllm/vllm-openai:latest
+          args:
+            - "--model"
+            - "/models/Mistral-7B-Instruct-v0.3"
+            - "--served-model-name"
+            - "mistral-7b"
+            - "--tensor-parallel-size"
+            - "2"                       # split across 2 GPUs
+            - "--max-model-len"
+            - "4096"
+            - "--gpu-memory-utilization"
+            - "0.80"
+            - "--port"
+            - "8000"
+          ports:
+            - containerPort: 8000
+          resources:
+            limits:
+              nvidia.com/gpu: 2         # <-- requests TWO GPUs (tensor-parallel)
+          volumeMounts:
+            - name: models
+              mountPath: /models
+          # tensor-parallel init + FP16 load is slow; allow up to ~7 min
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            failureThreshold: 90
+            periodSeconds: 10
+            initialDelaySeconds: 60
+      volumes:
+        - name: models
+          hostPath:
+            path: /home/ubuntu/models
+            type: Directory
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: vllm-large
+spec:
+  selector:
+    app: vllm-large
+  ports:
+    - port: 8000
+      targetPort: 8000
+---
+# ----------------------------------------------------------------------------
+# 2) vLLM INT4 — "fast path" backend, single GPU
+#    W4A16 quantized (~4GB) — fits easily on one T4 with lots of KV headroom.
+#    Identical to the working Tier 1 deployment.
+# ----------------------------------------------------------------------------
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vllm-fast
+  labels:
+    app: vllm-fast
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: vllm-fast
+  template:
+    metadata:
+      labels:
+        app: vllm-fast
+    spec:
+      runtimeClassName: nvidia
+      containers:
+        - name: vllm
+          image: vllm/vllm-openai:latest
+          args:
+            - "--model"
+            - "/models/Mistral-7B-Instruct-v0.3-W4A16-G128"
+            - "--served-model-name"
+            - "mistral-7b"
+            - "--max-model-len"
+            - "4096"
+            - "--gpu-memory-utilization"
+            - "0.80"
+            - "--port"
+            - "8000"
+          ports:
+            - containerPort: 8000
+          resources:
+            limits:
+              nvidia.com/gpu: 1
+          volumeMounts:
+            - name: models
+              mountPath: /models
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            failureThreshold: 90
+            periodSeconds: 10
+      volumes:
+        - name: models
+          hostPath:
+            path: /home/ubuntu/models
+            type: Directory
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: vllm-fast
+spec:
+  selector:
+    app: vllm-fast
+  ports:
+    - port: 8000
+      targetPort: 8000
+---
+# ----------------------------------------------------------------------------
+# 3) SGLang — structured-output / RadixAttention backend, single GPU
+#    Serves the FP16 Mistral (~14GB) on one T4 — tight but fits in 16GB.
+#    SGLang listens on 30000 inside the container.
+# ----------------------------------------------------------------------------
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sglang-code
+  labels:
+    app: sglang-code
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: sglang-code
+  template:
+    metadata:
+      labels:
+        app: sglang-code
+    spec:
+      runtimeClassName: nvidia
+      containers:
+        - name: sglang
+          image: lmsysorg/sglang:v0.3.6.post1-cu121
+          args:
+            - "python3"
+            - "-m"
+            - "sglang.launch_server"
+            - "--model-path"
+            - "/models/Mistral-7B-Instruct-v0.3"
+            - "--served-model-name"
+            - "mistral-7b-sglang"
+            - "--context-length"
+            - "2048"
+            - "--host"
+            - "0.0.0.0"
+            - "--port"
+            - "30000"
+            - "--mem-fraction-static"
+            - "0.93"
+            - "--attention-backend"
+            - "triton"
+          ports:
+            - containerPort: 30000
+          resources:
+            limits:
+              nvidia.com/gpu: 1
+          volumeMounts:
+            - name: models
+              mountPath: /models
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 30000
+            failureThreshold: 90
+            periodSeconds: 10
+      volumes:
+        - name: models
+          hostPath:
+            path: /home/ubuntu/models
+            type: Directory
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sglang-code
+spec:
+  selector:
+    app: sglang-code
+  ports:
+    - port: 8000          # expose on 8000 for gateway consistency
+      targetPort: 30000   # SGLang actually listens on 30000
+---
+# ----------------------------------------------------------------------------
+# 4) llama.cpp — CPU fallback backend, NO GPU
+#    Runs on CPU cores only (no nvidia runtime, no gpu resource request),
+#    so it leaves all 4 GPUs for the vLLM/SGLang backends.
+#    llama.cpp server listens on 8080 inside the container.
+# ----------------------------------------------------------------------------
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: llamacpp-cpu
+  labels:
+    app: llamacpp-cpu
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: llamacpp-cpu
+  template:
+    metadata:
+      labels:
+        app: llamacpp-cpu
+    spec:
+      # NOTE: no runtimeClassName: nvidia — this is a CPU workload
+      containers:
+        - name: llamacpp
+          image: ghcr.io/ggml-org/llama.cpp:server
+          args:
+            - "--model"
+            - "/models/gguf/Mistral-7B-Instruct-v0.3.Q4_K_M.gguf"
+            - "--host"
+            - "0.0.0.0"
+            - "--port"
+            - "8080"
+            - "--ctx-size"
+            - "4096"
+            - "--threads"
+            - "8"
+          ports:
+            - containerPort: 8080
+          resources:
+            requests:
+              cpu: "4"
+              memory: "8Gi"
+            limits:
+              cpu: "8"
+              memory: "12Gi"
+          volumeMounts:
+            - name: models
+              mountPath: /models
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            failureThreshold: 90
+            periodSeconds: 10
+      volumes:
+        - name: models
+          hostPath:
+            path: /home/ubuntu/models
+            type: Directory
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: llamacpp-cpu
+spec:
+  selector:
+    app: llamacpp-cpu
+  ports:
+    - port: 8000
+      targetPort: 8080

@@ -31,6 +31,7 @@ app = FastAPI(
 router_service = RouterService()
 kafka_producer  = RequestProducer()
 vllm_client     = VLLMClient(base_url="http://127.0.0.1:30800")
+vllm_large_client = VLLMClient(base_url="http://127.0.0.1:30801")
 sglang_client   = SGLangClient(base_url="http://localhost:8002")
 llamacpp_client = LlamaCppClient(base_url="http://localhost:8003")
 
@@ -65,8 +66,11 @@ def get_client(backend: str):
     elif backend == "tensorrt_reasoning":
         logger.warning("TensorRT not deployed → using vLLM")
         chosen = vllm_client
+    elif backend == "vllm_large":
+        # FP16 tensor-parallel backend (30801)
+        chosen = vllm_large_client
     else:
-        # vllm_fast and vllm_large both currently served by vLLM on 8001
+        # vllm_fast → INT4 backend (30800)
         chosen = vllm_client
 
     # pre-flight: if the chosen
